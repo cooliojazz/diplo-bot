@@ -3,6 +3,7 @@ package com.up.diplobot;
 import java.awt.Canvas;
 import java.awt.Color;
 import java.awt.Graphics;
+import java.awt.Rectangle;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.FileInputStream;
@@ -75,44 +76,44 @@ public class Game {
         }
     }
     
-    public void drawGame(Canvas c, Graphics g) {
-        g.drawImage(map, 0, 0, c.getWidth(), c.getHeight(), null);
+    public void drawGame(Rectangle r, Graphics g) {
+        g.drawImage(map, 0, 0, (int)r.getWidth(), (int)r.getHeight(), null);
         for (Territory t : territories) {
             if (t.getOccupant() != null) {
-                g.drawImage(t.getOwner().getCountryUnitImage(t.getOccupant().getType()), (int)(t.getInfo().getPosition().getX() * c.getWidth()) - 15, (int)(t.getInfo().getPosition().getY() * c.getHeight()) - 15, 30, 30, null);
+                g.drawImage(t.getOccupant().getCountry().getCountryUnitImage(t.getOccupant().getType()), (int)(t.getInfo().getPosition().getX() * r.getWidth()) - 15, (int)(t.getInfo().getPosition().getY() * r.getHeight()) - 15, 30, 30, null);
             } else if (t.getOwner() != null) {
                 g.setColor(t.getOwner().c);
-                g.fillOval((int)(t.getInfo().getPosition().getX() * c.getWidth()) - 3, (int)(t.getInfo().getPosition().getY() * c.getHeight()) - 3, 7, 7);
+                g.fillOval((int)(t.getInfo().getPosition().getX() * r.getWidth()) - 3, (int)(t.getInfo().getPosition().getY() * r.getHeight()) - 3, 7, 7);
             }
         }
     }
     
-    public void drawEditor(Canvas c, Graphics g) {
-        g.drawImage(map, 0, 0, c.getWidth(), c.getHeight(), null);
+    public void drawEditor(Rectangle r, Graphics g) {
+        g.drawImage(map, 0, 0, (int)r.getWidth(), (int)r.getHeight(), null);
         for (AdjacencyGraph.GraphPair<TerritoryDescriptor, TerritoryDescriptor> con : graph.getConnections()) {
             g.setColor(Color.DARK_GRAY);
-            g.drawLine((int)(con.t.getPosition().getX() * c.getWidth()), (int)(con.t.getPosition().getY() * c.getHeight()), (int)(con.s.getPosition().getX() * c.getWidth()), (int)(con.s.getPosition().getY() * c.getHeight()));
+            g.drawLine((int)(con.t.getPosition().getX() * r.getWidth()), (int)(con.t.getPosition().getY() * r.getHeight()), (int)(con.s.getPosition().getX() * r.getWidth()), (int)(con.s.getPosition().getY() * r.getHeight()));
         }
         for (TerritoryDescriptor t : territoryinfo) {
             g.setColor(t.getType().c);
             if (t.isSupplyCenter()) {
-                g.fillRect((int)(t.getPosition().getX() * c.getWidth()) - 4, (int)(t.getPosition().getY() * c.getHeight()) - 4, 10, 10);
+                g.fillRect((int)(t.getPosition().getX() * r.getWidth()) - 4, (int)(t.getPosition().getY() * r.getHeight()) - 4, 10, 10);
             } else {
-                g.fillOval((int)(t.getPosition().getX() * c.getWidth()) - 4, (int)(t.getPosition().getY() * c.getHeight()) - 4, 9, 9);
+                g.fillOval((int)(t.getPosition().getX() * r.getWidth()) - 4, (int)(t.getPosition().getY() * r.getHeight()) - 4, 9, 9);
             }
             g.setColor(getBGTextColor(t.getType().c));
-            g.drawString(t.toString(), (int)(t.getPosition().getX() * c.getWidth()) - g.getFontMetrics().stringWidth(t.toString()) / 2 + 1, (int)(t.getPosition().getY() * c.getHeight()) + 16);
-            g.drawString(t.toString(), (int)(t.getPosition().getX() * c.getWidth()) - g.getFontMetrics().stringWidth(t.toString()) / 2, (int)(t.getPosition().getY() * c.getHeight()) + 16);
+            g.drawString(t.toString(), (int)(t.getPosition().getX() * r.getWidth()) - g.getFontMetrics().stringWidth(t.toString()) / 2 + 1, (int)(t.getPosition().getY() * r.getHeight()) + 16);
+            g.drawString(t.toString(), (int)(t.getPosition().getX() * r.getWidth()) - g.getFontMetrics().stringWidth(t.toString()) / 2, (int)(t.getPosition().getY() * r.getHeight()) + 16);
             g.setColor(t.getType().c);
-            g.drawString(t.toString(), (int)(t.getPosition().getX() * c.getWidth()) - g.getFontMetrics().stringWidth(t.toString()) / 2, (int)(t.getPosition().getY() * c.getHeight()) + 15);
+            g.drawString(t.toString(), (int)(t.getPosition().getX() * r.getWidth()) - g.getFontMetrics().stringWidth(t.toString()) / 2, (int)(t.getPosition().getY() * r.getHeight()) + 15);
             if (t.getStartingCountry() != null) {
                 g.setColor(t.getStartingCountry().c);
-                g.fillOval((int)(t.getPosition().getX() * c.getWidth()) - 3, (int)(t.getPosition().getY() * c.getHeight()) - 3, 7, 7);
+                g.fillOval((int)(t.getPosition().getX() * r.getWidth()) - 3, (int)(t.getPosition().getY() * r.getHeight()) - 3, 7, 7);
             }
         }
         if (GraphBuilder.selected != null) {
             g.setColor(Color.WHITE);
-            g.fillOval((int)(GraphBuilder.selected.getPosition().getX() * c.getWidth()) - 4, (int)(GraphBuilder.selected.getPosition().getY() * c.getHeight()) - 4, 9, 9);
+            g.fillOval((int)(GraphBuilder.selected.getPosition().getX() * r.getWidth()) - 4, (int)(GraphBuilder.selected.getPosition().getY() * r.getHeight()) - 4, 9, 9);
         }
         g.setColor(Color.red);
         g.drawString(GraphBuilder.m.toString(), 10, 20);

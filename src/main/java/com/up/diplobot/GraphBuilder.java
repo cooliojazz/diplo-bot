@@ -170,11 +170,7 @@ public class GraphBuilder {
                         break;
                     }
                     case 'q': {
-                        try {
-                            Main.instance.sendCurrentBoard();
-                        } catch (IOException ex) {
-                            Logger.getLogger(GraphBuilder.class.getName()).log(Level.SEVERE, null, ex);
-                        }
+                        Main.instance.sendCurrentBoard();
                         break;
                     }
                 }

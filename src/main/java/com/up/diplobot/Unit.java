@@ -30,6 +30,10 @@ public class Unit implements Serializable {
         if (type == UnitType.FLEET) return td.hasWater();
         return false;
     }
+
+    public Country getCountry() {
+        return c;
+    }
     
     public enum UnitType {
         ARMY("Army", "army.png"), FLEET("Fleet", "fleet.png");

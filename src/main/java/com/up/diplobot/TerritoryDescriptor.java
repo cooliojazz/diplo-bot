@@ -102,12 +102,19 @@ public class TerritoryDescriptor implements Serializable {
     }
     
     public enum TerritoryType {
-        WATER(Color.BLUE.darker()), COAST(Color.CYAN.darker()), LAND(Color.GREEN.darker());
+        WATER("Ocean", Color.BLUE.darker()), COAST("Coast", Color.CYAN.darker()), LAND("Land", Color.GREEN.darker());
         
+        private String text;
         public Color c;
 
-        private TerritoryType(Color c) {
+        private TerritoryType(String text, Color c) {
+            this.text = text;
             this.c = c;
+        }
+
+        @Override
+        public String toString() {
+            return text;
         }
         
     }

@@ -3,6 +3,7 @@ package com.up.diplobot;
 import java.awt.Canvas;
 import java.awt.Frame;
 import java.awt.Graphics;
+import java.awt.Rectangle;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.awt.image.BufferedImage;
@@ -17,11 +18,11 @@ public class DrawableWindow {
 
     Frame f;
     Canvas c;
-    BiConsumer<Canvas, Graphics> con;
+    BiConsumer<Rectangle, Graphics> con;
     Thread renderer;
     public BufferedImage buffer;
     
-    public DrawableWindow(int width, int height, BiConsumer<Canvas, Graphics> con) {
+    public DrawableWindow(int width, int height, BiConsumer<Rectangle, Graphics> con) {
         this.con = con;
         f = new Frame();
         c = new Canvas() {
@@ -29,7 +30,7 @@ public class DrawableWindow {
             @Override
             public void paint(Graphics g) {
                 buffer = new BufferedImage(getWidth(), getHeight(), BufferedImage.TYPE_INT_ARGB);
-                con.accept(c, buffer.getGraphics());
+                con.accept(c.getBounds(), buffer.getGraphics());
                 g.drawImage(buffer, 0, 0, null);
             }
             

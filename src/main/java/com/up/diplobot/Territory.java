@@ -5,9 +5,9 @@ package com.up.diplobot;
  * @author Ricky
  */
 public class Territory {
-    TerritoryDescriptor info;
-    Country owner;
-    Unit occupant = null;
+    private TerritoryDescriptor info;
+    private Country owner;
+    private Unit occupant = null;
 
     public Territory(TerritoryDescriptor info) {
         this.info = info;
