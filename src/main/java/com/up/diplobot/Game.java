@@ -11,8 +11,11 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import javafx.util.Pair;
 import javax.imageio.ImageIO;
 
 /**
@@ -27,6 +30,7 @@ public class Game {
     private ArrayList<Player> players = new ArrayList<>();
     ArrayList<Territory> territories = new ArrayList<>();
     private int turn;
+    private HashMap<TerritoryDescriptor, HashMap<TerritoryDescriptor, Integer>> influence = new HashMap<>();
 
     public Game() {
         try {
@@ -56,8 +60,8 @@ public class Game {
         return turn / 2 + 1901;
     }
     
-    public String getSeason() {
-        return turn % 2 == 0 ? "Spring" : "Fall";
+    public Season getSeason() {
+        return turn % 2 == 0 ? Season.SPRING : Season.FALL;
     }
     
     public Territory getTerritoryFromCode(String code) {
@@ -67,6 +71,36 @@ public class Game {
             }
         }
         return null;
+    }
+    
+    public HashMap<TerritoryDescriptor, Integer> getInfluencesOn(Territory t) {
+        if (!influence.containsKey(t.getInfo())) {
+            influence.put(t.getInfo(), new HashMap<>());
+        }
+        return influence.get(t.getInfo());
+    }
+    
+    public HashMap<TerritoryDescriptor, Pair<TerritoryDescriptor, Integer>> calculateMaxInfluences() {
+        HashMap<TerritoryDescriptor, Pair<TerritoryDescriptor, Integer>> maxis = new HashMap<>();
+        for (Map.Entry<TerritoryDescriptor, HashMap<TerritoryDescriptor, Integer>> tis : influence.entrySet()) {
+            maxis.put(tis.getKey(), calculateMaxInfluenceIn(tis.getValue()));
+        }
+        return maxis;
+    }
+    
+    public Pair<TerritoryDescriptor, Integer> calculateMaxInfluenceIn(HashMap<TerritoryDescriptor, Integer> inf) {
+        TerritoryDescriptor maxtd = null;
+        int maxi = 0;
+        for (Map.Entry<TerritoryDescriptor, Integer> si : inf.entrySet()) {
+            if (si.getValue() == maxi) {
+                maxtd = null;
+            }
+            if (si.getValue() > maxi) {
+                maxtd = si.getKey();
+                maxi = si.getValue();
+            }
+        }
+        return new Pair<>(maxtd, maxi);
     }
     
     public void startGame() {
@@ -139,5 +173,21 @@ public class Game {
         hsb[1] = hsb[1] - 0.4f;
         hsb[2] = hsb[2] - 0.15f;
         return Color.getHSBColor(hsb[0], hsb[1], hsb[2]);
+    }
+    
+    public enum Season {
+        FALL("Fall"), SPRING("Spring");
+        String name;
+
+        private Season(String name) {
+            this.name = name;
+        }
+
+        @Override
+        public String toString() {
+            return name;
+        }
+        
+        
     }
 }

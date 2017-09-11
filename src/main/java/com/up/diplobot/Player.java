@@ -12,6 +12,7 @@ public class Player implements Serializable {
     private Country c;
     private long uid;
     private ArrayList<Order> orders = new ArrayList<>();
+    public int supplyoff = 0;
 
     public Player(Country c, User u) {
         this.c = c;

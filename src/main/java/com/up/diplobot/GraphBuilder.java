@@ -26,7 +26,7 @@ public class GraphBuilder {
 
     public GraphBuilder(Game g) {
         this.g = g;
-        this.win = new DrawableWindow(500, 500, g::drawGame);
+        this.win = new DrawableWindow(500, 500, g::drawEditor);
         win.getCanvas().repaint();
         win.getCanvas().addMouseListener(new MouseAdapter() {
             

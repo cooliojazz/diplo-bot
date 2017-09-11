@@ -50,6 +50,27 @@ public class AdjacencyGraph implements Serializable {
         return false;
     }
     
+    public boolean areConnectedViaConoys(TerritoryDescriptor t1, TerritoryDescriptor t2, ArrayList<Order> convoys) {
+        boolean[] visited = new boolean[keys.size()];
+        ArrayList<TerritoryDescriptor> queue = new ArrayList<>();
+        visited[keys.indexOf(t1)] = true;
+        queue.add(t1);
+        while (queue.size() > 0) {
+            TerritoryDescriptor curt = queue.get(0);
+            for (TerritoryDescriptor td : getConnections(curt)) {
+                if (td == t2) {
+                    return true;
+                }
+                if (convoys.stream().anyMatch(o -> o.main.getInfo() == td) && !visited[keys.indexOf(td)]) {
+                    queue.add(td);
+                    visited[keys.indexOf(td)] = true;
+                }
+            }
+            queue.remove(curt);
+        }
+        return false;
+    }
+    
     public void addTerritory(TerritoryDescriptor t) {
         for (TerritoryDescriptor t2 : keys) {
             graph.put(new GraphPair<>(t, t2), false);

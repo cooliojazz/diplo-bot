@@ -1,5 +1,6 @@
 package com.up.diplobot;
 
+import com.sun.org.apache.bcel.internal.generic.D2F;
 import java.awt.Rectangle;
 import java.awt.image.BufferedImage;
 import java.io.File;
@@ -16,6 +17,7 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import javafx.util.Pair;
 import javax.imageio.ImageIO;
 import javax.security.auth.login.LoginException;
@@ -38,20 +40,22 @@ public class Main extends ListenerAdapter {
     
     /**
      * Game order:
-    ~* 0. Have everyone register as a country 
+    =* 0. Have everyone register as a country 
     =* 1. Send turn notification (You have until XX to send your orders)
-    ~* 2. Gather orders
-    ~* 3. Evaluate orders
-     * 4. Resolve conflicts/displacements
-    ~* 5. Display status
-     * 5. Repeat for Fall
-     * 6. Do end of year supply checks
+    =* 2. Gather orders
+    =* 3. Evaluate orders
+    =* 4. Resolve conflicts/displacements
+    =* 5. Display status
+    ~* 5. Repeat for Fall
+    ~* 6. Do end of year supply checks
     ~* 7. Repeat For Spring
      * 
      */
 
-//    public static final long TURN_INTERVAL = 60 * 60 * 24 * 3;
-    public static final long TURN_INTERVAL = 1000 * 60;
+//    public static final long TURN_INTERVAL = 1000 * 60 * 60 * 24 * 3;
+    public static final long TURN_INTERVAL = 1000 * 20;
+    public static final long RETREATS_INTERVAL = 1000 * 10;
+    public static final long SUPPLY_INTERVAL = 1000 * 30;
     public static Date nextt = new Date();
     public Game game = new Game();
 //    public static GraphBuilder gb;
@@ -61,6 +65,8 @@ public class Main extends ListenerAdapter {
     public static TextChannel mapchan;
     public static TextChannel orderschan;
     public static ScheduledExecutorService exec = Executors.newScheduledThreadPool(1);
+    public TurnPhase phase = TurnPhase.JOINING;
+    public HashMap<Territory, Unit> displaced = new HashMap<>();
     
     /**
      * @param args the command line arguments
@@ -75,175 +81,306 @@ public class Main extends ListenerAdapter {
     }
     
     public void startGame() {
+        phase = TurnPhase.ORDERS;
         game.startGame();
         sendCurrentBoard();
-        instance.sendTurnNotices(nextt);
-        exec.schedule(() -> {
-            instance.processOrders();
-        }, TURN_INTERVAL, TimeUnit.MILLISECONDS);
+        sendTurnNotices(nextt);
+        exec.schedule(this::processOrders, TURN_INTERVAL, TimeUnit.MILLISECONDS);
     }
     
     public void processOrders() {
-        //Pre-grab order info
-        HashMap<Order, String> orderis = new HashMap<>();
-        for (Player p : game.getPlayers()) {
-            for (Order o : p.getOrders()) {
-                orderis.put(o, p.getUser().getName() + " ordered that the " + o);
+        try {
+            //Pre-grab order info
+            HashMap<Order, String> orderis = new HashMap<>();
+            for (Player p : game.getPlayers()) {
+                for (Order o : p.getOrders()) {
+                    orderis.put(o, "*" + p.getUser().getName() + "* ordered that the " + o);
+                }
             }
+
+            //Proccess orders
+            //Group orders
+            HashMap<Order.OrderType, ArrayList<Order>> gorders = new HashMap<>();
+            for (Order.OrderType o : Order.OrderType.values()) {
+                gorders.put(o, new ArrayList<>());
+            }
+            for (Player p : game.getPlayers()) {
+                for (Order o : p.getOrders()) {
+                    gorders.get(o.getType()).add(o);
+                }
+            }
+            //Add any units without orders
+            for (Territory t : game.territories) {
+                if (t.getOccupant() != null) {
+                    if (!gorders.entrySet().stream().map(e -> e.getValue()).anyMatch(e -> e.stream().anyMatch(o -> o.main.equals(t)))) {
+                        gorders.get(Order.OrderType.HOLD).add(new Order(Order.OrderType.HOLD, t.getOwner(), t));
+                    }
+                }
+            }
+            //Calculate influence
+            for (Order o : gorders.get(Order.OrderType.HOLD)) {
+                HashMap<TerritoryDescriptor, Integer> si = game.getInfluencesOn(o.main);
+                si.put(o.main.getInfo(), 1);
+            }
+            for (Order o : gorders.get(Order.OrderType.MOVE)) {
+                int inf = 1;
+                if (!game.graph.areConnected(o.main.getInfo(), o.dest.getInfo())) {
+                    if (!game.graph.areConnectedViaConoys(o.main.getInfo(), o.dest.getInfo(), gorders.get(Order.OrderType.CONVOY))) {
+                        inf = 0;
+                    }
+                }
+                HashMap<TerritoryDescriptor, Integer> si = game.getInfluencesOn(o.dest);
+                if (!si.containsKey(o.main.getInfo())) {
+                    si.put(o.main.getInfo(), inf);
+                } else {
+                    si.put(o.main.getInfo(), si.get(o.main.getInfo()) + inf);
+                }
+            }
+            for (Order o : gorders.get(Order.OrderType.SUPPORT)) {
+                Territory dest;
+                if (o.dest != null) {
+                    dest = o.dest;
+                } else {
+                    dest = o.smain;
+                }
+                HashMap<TerritoryDescriptor, Integer> si = game.getInfluencesOn(dest);
+                if (!si.containsKey(o.smain.getInfo())) {
+                    si.put(o.smain.getInfo(), 1);
+                } else {
+                    si.put(o.smain.getInfo(), si.get(o.smain.getInfo()) + 1);
+                }
+            }
+            //Get maxes
+            HashMap<TerritoryDescriptor, Pair<TerritoryDescriptor, Integer>> maxis = game.calculateMaxInfluences();
+
+            HashMap<Unit, Territory> olddisplaced = new HashMap<>();
+            displaced = new HashMap<>();
+            //Do moves
+            for (Order o : gorders.get(Order.OrderType.MOVE)) {
+                if (maxis.get(o.dest.getInfo()).getKey() == o.main.getInfo()) {
+                    //Do move! Displacements might have to be dealt with when getting unit to move
+                    olddisplaced.put(o.main.getOccupant(), o.main);
+                    if (o.dest.getOccupant() != null) displaced.put(o.dest, o.dest.getOccupant());
+                    if (displaced.containsKey(o.main)) {
+                        o.dest.setOccupant(displaced.get(o.main));
+                        displaced.remove(o.main);
+                    } else {
+                        o.dest.setOccupant(o.main.getOccupant());
+                        o.main.setOccupant(null);
+                    }
+                } else {
+                    //Set failed for this and supporting orders
+                    o.setFailed(true);
+                    for (Order so : gorders.get(Order.OrderType.SUPPORT)) {
+                        if (so.smain == o.main && so.dest == o.dest) {
+                            so.setFailed(true);
+                        }
+                    }
+                    //Set this unit to re-influence it's territory
+                    Pair<TerritoryDescriptor, Integer> mt = maxis.get(o.main.getInfo());
+                    if (mt != null && mt.getValue() == 1) {
+                        maxis.put(o.main.getInfo(), new Pair<>(null, 1));
+                        //Deal with this unit having been displaced and work backwards if necessary
+                        Unit du = displaced.get(o.main);
+                        if (du != null) {
+                            displaced.remove(o.main);
+                            olddisplaced.put(du, o.main);
+                            while (du != null) {
+                                Territory t = olddisplaced.get(du);
+                                Unit tu = t.getOccupant();
+                                t.setOccupant(du);
+                                du = tu;
+                            }
+                        }
+                    }
+                }
+            }
+
+            //Display orders
+            ArrayList<String> ordersm = new ArrayList<>();
+            ordersm.add("\n╓┘\n╠═══════════════════════════════════════\n║\n" + "║ Orders for the " + game.getSeason() + " of " + game.getYear() + " are as follows:\n║\n");
+            for (Map.Entry<Order, String> os : orderis.entrySet()) {
+                if (ordersm.get(ordersm.size() - 1).length() > 1500) ordersm.add("");
+                ordersm.set(ordersm.size() - 1, ordersm.get(ordersm.size() - 1) + "║ " + (os.getKey().isFailed() ? "~~" : "") + os.getValue() + (os.getKey().isFailed() ? "~~" : "")  + "\n");
+            }
+            ordersm.set(ordersm.size() - 1, ordersm.get(ordersm.size() - 1) + "║\n╠═══════════════════════════════════════\n╙┐\n");
+            for (String msg : ordersm) sendChannelMessage(orderschan, msg);
+            //Display last turn
+            sendCurrentBoard();
+
+            //Send displacement notices
+            sendRetreatNotices(displaced, nextt);
+            
+            phase = TurnPhase.RETREATS;
+            exec.schedule(this::processDisplacements, RETREATS_INTERVAL, TimeUnit.MILLISECONDS);
+        } catch (Exception e) {
+            e.printStackTrace();
         }
-        //Proccess orders
-        //Group orders
-        HashMap<Order.OrderType, ArrayList<Order>> gorders = new HashMap<>();
-        for (Order.OrderType o : Order.OrderType.values()) {
-            gorders.put(o, new ArrayList<>());
-        }
+    }
+    
+    public void processDisplacements() {
+        //Handle displacements
+        //...........
+        ArrayList<Order> orders = new ArrayList<>();
         for (Player p : game.getPlayers()) {
             for (Order o : p.getOrders()) {
-                gorders.get(o.getType()).add(o);
+                orders.add(o);
             }
         }
         //Calculate influence
-        HashMap<TerritoryDescriptor, HashMap<TerritoryDescriptor, Integer>> influence = new HashMap<>();
-        for (Order o : gorders.get(Order.OrderType.HOLD)) {
-            if (!influence.containsKey(o.main.getInfo())) {
-                influence.put(o.main.getInfo(), new HashMap<>());
-            }
-            HashMap<TerritoryDescriptor, Integer> si = influence.get(o.main.getInfo());
-//            if (!si.containsKey(o.main.getInfo())) {
-            si.put(o.main.getInfo(), 1);
-//            } else {
-//                si.put(o.main.getInfo(), si.get(o.main.getInfo()) + 1);
-//            }
-        }
-        for (Order o : gorders.get(Order.OrderType.MOVE)) {
-            if (!influence.containsKey(o.dest.getInfo())) {
-                influence.put(o.dest.getInfo(), new HashMap<>());
-            }
-            HashMap<TerritoryDescriptor, Integer> si = influence.get(o.dest.getInfo());
+        for (Order o : orders) {
+            HashMap<TerritoryDescriptor, Integer> si = game.getInfluencesOn(o.dest);
             if (!si.containsKey(o.main.getInfo())) {
                 si.put(o.main.getInfo(), 1);
             } else {
                 si.put(o.main.getInfo(), si.get(o.main.getInfo()) + 1);
             }
         }
-        for (Order o : gorders.get(Order.OrderType.SUPPORT)) {
-            if (!influence.containsKey(o.dest.getInfo())) {
-                influence.put(o.dest.getInfo(), new HashMap<>());
-            }
-            HashMap<TerritoryDescriptor, Integer> si = influence.get(o.dest.getInfo());
-            if (!si.containsKey(o.smain.getInfo())) {
-                si.put(o.smain.getInfo(), 1);
-            } else {
-                si.put(o.smain.getInfo(), si.get(o.smain.getInfo()) + 1);
-            }
-        }
-        /*
-        
-        Figure out convoying!!
-        -Moves that aren't adjacent need to check that there are valid convoy orders to carry it the entire way
-        
-        
-        */
         //Get maxes
-        HashMap<TerritoryDescriptor, TerritoryDescriptor> maxis = new HashMap<>();
-        for (Map.Entry<TerritoryDescriptor, HashMap<TerritoryDescriptor, Integer>> tis : influence.entrySet()) {
-            TerritoryDescriptor maxtd = null;
-            int maxi = 0;
-            for (Map.Entry<TerritoryDescriptor, Integer> si : tis.getValue().entrySet()) {
-                if (si.getValue() == maxi) {
-                    maxtd = null;
-                }
-                if (si.getValue() > maxi) {
-                    maxtd = si.getKey();
-                    maxi = si.getValue();
-                }
-            }
-            if (maxtd != null) maxis.put(tis.getKey(), maxtd);
-        }
-        
-        HashMap<TerritoryDescriptor, Unit> displaced = new HashMap<>();
-        
+        HashMap<TerritoryDescriptor, Pair<TerritoryDescriptor, Integer>> maxis = game.calculateMaxInfluences();
+
         //Do moves
-        for (Order o : gorders.get(Order.OrderType.MOVE)) {
-            if (maxis.get(o.dest.getInfo()) == o.main.getInfo()) {
-                //Do move! Displacements might have to be dealt with when getting unit to move
-                if (o.dest.getOccupant() != null) displaced.put(o.dest.getInfo(), o.dest.getOccupant());
-                if (displaced.containsKey(o.main.getInfo())) {
-                    o.dest.setOccupant(displaced.get(o.main.getInfo()));
-                    displaced.remove(o.main.getInfo());
-                } else {
-                    o.dest.setOccupant(o.main.getOccupant());
-                    o.main.setOccupant(null);
+        for (Order o : orders) {
+            if (maxis.get(o.dest.getInfo()).getKey() == o.main.getInfo()) {
+                //Do move!
+                if (displaced.containsKey(o.main)) {
+                    o.dest.setOccupant(displaced.get(o.main));
+                    displaced.remove(o.main);
                 }
-                if (o.dest.getInfo().getType() != TerritoryDescriptor.TerritoryType.WATER) 
-                    o.dest.setOwner(o.getSender());
             } else {
-                //Set failed for this and supporting orders
+                //Set failed for this
                 o.setFailed(true);
-                for (Order so : gorders.get(Order.OrderType.SUPPORT)) {
-                    if (so.smain == o.main && so.dest == o.dest) {
-                        so.setFailed(true);
-                    }
+            }
+        }
+            
+
+        //If fall, update land ownership, check supply, disband or grant
+        if (game.getSeason() == Game.Season.FALL) {
+            for (Territory t : game.territories) {
+                if (t.getOccupant() != null) t.setOwner(t.getOccupant().getCountry());
+            }
+            //Check supply
+            for (Player p : game.getPlayers()) {
+                Country c = p.getCountry();
+                ////
+                int asupply = (int)(long)game.territories.stream().filter(t -> t.getInfo().isSupplyCenter() && c.equals(t.getOwner())).collect(Collectors.counting());
+                int usupply = (int)(long)game.territories.stream().filter(t -> t.getOccupant() != null && c.equals(t.getOwner())).collect(Collectors.counting());
+                if (usupply < asupply) {
+                    sendUserMessage(p.getUser(), "Good news, after evaluating your various supply stations, I have determined that you can now sustain " + (asupply - usupply) + " extra troops!");
                 }
-                //Deal with this unit having been displaced and work backwards if necessary
+                if (asupply < usupply) {
+                    sendUserMessage(p.getUser(), "I do apologize, but after evaluating your various supply stations, I have determined that you can no longer sustain " + (usupply - asupply) + " of your troops!");
+                }
+                p.supplyoff = asupply - usupply;
+            }
+            //Send unit update requests
+            phase = TurnPhase.SUPPLY;
+            exec.schedule(this::processSupply, SUPPLY_INTERVAL, TimeUnit.MILLISECONDS);
+        } else {
+            nextTurn();
+        }
+    }
+    
+    public void processSupply() {
+        for (Player p : game.getPlayers()) {
+            for (Order o : p.getOrders()) {
+                if (p.supplyoff < 0) {
+                    o.main.setOccupant(null);
+                } else {
+                    o.main.setOccupant(new Unit(p.getCountry(), o.ut));
+                }
+            }
+            if (p.supplyoff < 0) {
+                //Forced random disband
+                sendUserMessage(p.getUser(), "I do apologize, but since you did not specify which troop to disband, a random one was chosen for you!");
+                Territory ter = game.territories.stream().filter(t -> t.getOwner() == p.getCountry()).findAny().orElse(null);
+                if (ter != null) ter.setOccupant(null);
             }
         }
         
-        //Display orders
-        ArrayList<String> ordersm = new ArrayList<String>();
-        ordersm.add("===========================================================\n" + "Orders for the " + game.getSeason() + " of " + game.getYear() + " are as follows:\n \n");
-        for (Map.Entry<Order, String> os : orderis.entrySet()) {
-            if (ordersm.get(ordersm.size() - 1).length() > 1000) ordersm.add("");
-            ordersm.set(ordersm.size() - 1, ordersm.get(ordersm.size() - 1) + "(" + (os.getKey().isFailed() ? "*" : "-") + ") " + os.getValue() + "\n");
-        }
-        for (String msg : ordersm) sendChannelMessage(orderschan, msg);
-        //Display last turn
-        sendCurrentBoard();
-        
-        //Handle displacements
-        
-        
+        nextTurn();
+    }
+    
+    public void nextTurn() {
         //Next turn
         for (Player p : game.getPlayers()) {
             p.clearOrders();
         }
         game.nextTurn();
         nextt = new Date(nextt.getTime() + TURN_INTERVAL);
-        instance.sendTurnNotices(nextt);
-        exec.schedule(() -> {
-            instance.processOrders();
-        }, TURN_INTERVAL, TimeUnit.MILLISECONDS);
+        sendTurnNotices(nextt);
+        
+        phase = TurnPhase.ORDERS;
+        exec.schedule(this::processOrders, TURN_INTERVAL, TimeUnit.MILLISECONDS);
     }
     
     @Override
     public void onMessageReceived(MessageReceivedEvent event) {
         if (event.isFromType(ChannelType.PRIVATE) && !event.getAuthor().equals(jda.getSelfUser())) {
             Player ply = getPlayerFromUser(event.getAuthor());
-            if (ply == null) {
-                Pattern joinp = Pattern.compile("I would (?:very )?(?:much )?(?:like to (?:join|play)|appreciate (?:join|play)ing) (?:the game|Diplomacy)? ?as (.+)\\.");
-                Matcher joinm = joinp.matcher(event.getMessage().getContent());
-                if (joinm.find()) {
-                    Country c = Country.valueOf(joinm.group(1).toUpperCase());
-                    if (game.getPlayers().stream().anyMatch(p -> p.getCountry() == c)) {
-                        sendUserMessage(event.getAuthor(), "I do apologize, but the esteemed " + game.getPlayers().stream().filter(p -> p.getCountry() == c).findFirst().get().getUser().getName() + " has already stepped up to play as " + c + ". Do please choose someone else and try again though!");
+            switch (phase) {
+                case JOINING: {
+                    if (ply == null) {
+                        Pattern joinp = Pattern.compile("I would (?:very )?(?:much )?(?:like to (?:join|play)|appreciate (?:join|play)ing) (?:the game|Diplomacy)? ?as (.+)\\.");
+                        Matcher joinm = joinp.matcher(event.getMessage().getContent());
+                        if (joinm.find()) {
+                            Country c = Country.valueOf(joinm.group(1).toUpperCase());
+                            if (game.getPlayers().stream().anyMatch(p -> p.getCountry() == c)) {
+                                sendUserMessage(event.getAuthor(), "I do apologize, but the esteemed " + game.getPlayers().stream().filter(p -> p.getCountry() == c).findFirst().get().getUser().getName() + " has already stepped up to play as " + c + ". Do please choose someone else and try again though!");
+                                return;
+                            }
+                            Player p = new Player(c, event.getAuthor());
+                            game.addPlayer(p);
+                            sendUserMessage(event.getAuthor(), "Then the wonderful country of " + c + " you shall be!");
+                            sendChannelMessage(orderschan, "Our good friend " + p.getUser().getName() + " has decided to play the role of " + c + " in this gathering.");
+//                            if (game.getPlayers().size() == Country.values().length - 6) startGame();
+                            return;
+                        }
+                    }
+                    if (event.getMessage().getContent().equals("Please start the game, gamemaster Luadon.")) {
+                        startGame();
                         return;
                     }
-                    Player p = new Player(c, event.getAuthor());
-                    game.addPlayer(p);
-                    sendUserMessage(event.getAuthor(), "Then the wonderful country of " + c + " you shall be!");
-                    sendChannelMessage(orderschan, "Our good friend " + p.getUser().getName() + " has decided to play the role of " + c + " in this gathering.");
-                    startGame();
+                    break;
+                }
+                case ORDERS: {
+                    Order o = new Order(game, event.getMessage().getContent(), ply);
+                    o.setSender(ply.getCountry());
+                    if (o.isValid()) {
+                        ply.addOrder(o);
+                    } else {
+                        sendUserMessage(event.getAuthor(), o.vmsg);
+                    }
                     return;
                 }
-            } else {
-                Order o = new Order(game, event.getMessage().getContent());
-                o.setSender(ply.getCountry());
-                if (o.isValid()) {
-                    ply.addOrder(o);
-                } else {
-                    sendUserMessage(event.getAuthor(), o.vmsg);
+                case RETREATS: {
+                    Order o = new Order(game, event.getMessage().getContent(), ply);
+                    o.setSender(ply.getCountry());
+                    if (o.getType() != null && o.getType() == Order.OrderType.MOVE) {
+                        if (o.isValid()) {
+                            ply.addOrder(o);
+                        } else {
+                            sendUserMessage(event.getAuthor(), o.vmsg);
+                        }
+                    } else {
+                        sendUserMessage(event.getAuthor(), "I do apologize, but only move orders are available to describe where to retreat your units to!");
+                    }
+                    return;
                 }
-                return;
+                case SUPPLY: {
+                    Order o = new Order(game, event.getMessage().getContent(), ply);
+                    o.setSender(ply.getCountry());
+                    if (o.getType() != null && o.getType() == Order.OrderType.SELECT) {
+                        if (o.isValid()) {
+                            ply.addOrder(o);
+                        } else {
+                            sendUserMessage(event.getAuthor(), o.vmsg);
+                        }
+                    } else {
+                        sendUserMessage(event.getAuthor(), "I do apologize, but only unit specifying orders are available to describe units to recruit or disband!");
+                    }
+                    return;
+                }
             }
             sendUserMessage(event.getAuthor(), "I do apologize, but I just cannot understand what it is that you are requesting of me.");
         }
@@ -273,9 +410,30 @@ public class Main extends ListenerAdapter {
         c.sendMessage(m).queue();
     }
     
+    public void sendRetreatNotices(HashMap<Territory, Unit> displaced, Date d) {
+        for (Player p : game.getPlayers()) {
+            int total = 0;
+            for (Map.Entry<Territory, Unit> dis : displaced.entrySet()) {
+                if (p.getCountry() == dis.getValue().getCountry()) {
+                    sendUserMessage(p.getUser(), "The " + dis.getValue().getType() + " in " + dis.getKey().getInfo().getName() + " has been forced to retreat!");
+                    total++;
+                }
+            }
+            if (total > 0) {
+                sendUserMessage(p.getUser(), "You have until " + DateFormat.getInstance().format(d) + " to send me your " + total + " retreat order(s), or else your units witout valid orders will be forced to disband from your millitary!");
+            } else {
+                sendUserMessage(p.getUser(), "None of your units were forced back from their current positions this season! Good on you!");
+            }
+        }
+    }
+    
     public void sendTurnNotices(Date d) {
         for (Player p : game.getPlayers()) {
             sendUserMessage(p.getUser(), "You have until " + DateFormat.getInstance().format(d) + " to send me all your orders for the " + game.getSeason() + " of " + game.getYear() + ".");
         }
+    }
+    
+    enum TurnPhase {
+        JOINING, ORDERS, RETREATS, SUPPLY
     }
 }

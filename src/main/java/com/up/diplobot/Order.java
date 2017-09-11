@@ -8,6 +8,7 @@ import java.util.regex.Pattern;
  * @author Ricky
  */
 public class Order {
+    public final static Pattern selp = Pattern.compile("^(A|F) ([A-Z]{3})");
     public final static Pattern holdp = Pattern.compile("^(A|F) ([A-Z]{3}) H");
     public final static Pattern movep = Pattern.compile("^(A|F) ([A-Z]{3})-([A-Z]{3})");
     public final static Pattern suppp = Pattern.compile("^(A|F) ([A-Z]{3}) S (A|F) ([A-Z]{3})(?:-([A-Z]{3}))?");
@@ -19,28 +20,51 @@ public class Order {
     Territory smain = null;
     private boolean valid = true;
     String vmsg = "";
-    private Game g;
     private boolean failed = false;
     private Country sender;
+    public Unit.UnitType ut;
 
-    public Order(Game g, String order) {
-        this.g = g;
-//        this.order = order;
+    public Order(Game g, String order, Player p) {
+        order = order.toUpperCase();
+        Matcher selm = selp.matcher(order);
         Matcher holdm = holdp.matcher(order);
         Matcher movem = movep.matcher(order);
         Matcher suppm = suppp.matcher(order);
         Matcher convm = convp.matcher(order);
-        if (holdm.find()) {
+        if (selm.find()) {
+            type = OrderType.SELECT;
+            main = g.getTerritoryFromCode(holdm.group(2));
+            if (main != null) {
+                if (main.getOwner() == p.getCountry()) {
+//                    if (main.getOccupant() != null) {
+                        ut = getUnitTypeFromCode(holdm.group(1));
+//                        if (ut != main.getOccupant().getType()) {
+//                            incorrectUnitCode(main.getInfo(), ut);
+//                        }
+//                    } else {
+//                        missingUnitCode(main.getInfo());
+//                    }
+                } else {
+                    invalidOwner(main);
+                }
+            } else {
+                invalidTerritoyCode(holdm.group(2));
+            }
+        } else if (holdm.find()) {
             type = OrderType.HOLD;
             main = g.getTerritoryFromCode(holdm.group(2));
             if (main != null) {
-                if (main.getOccupant() != null) {
-                    Unit.UnitType ut = getUnitTypeFromCode(holdm.group(1));
-                    if (ut != main.getOccupant().getType()) {
-                        incorrectUnitCode(main.getInfo(), ut);
+                if (main.getOwner() == p.getCountry()) {
+                    if (main.getOccupant() != null) {
+                        Unit.UnitType ut = getUnitTypeFromCode(holdm.group(1));
+                        if (ut != main.getOccupant().getType()) {
+                            incorrectUnitCode(main.getInfo(), ut);
+                        }
+                    } else {
+                        missingUnitCode(main.getInfo());
                     }
                 } else {
-                    missingUnitCode(main.getInfo());
+                    invalidOwner(main);
                 }
             } else {
                 invalidTerritoyCode(holdm.group(2));
@@ -49,28 +73,36 @@ public class Order {
             type = OrderType.MOVE;
             main = g.getTerritoryFromCode(movem.group(2));
             if (main != null) {
-                if (main.getOccupant() != null) {
-                    Unit.UnitType ut = getUnitTypeFromCode(movem.group(1));
-                    if (ut != main.getOccupant().getType()) {
-                        incorrectUnitCode(main.getInfo(), ut);
-                    }
-                } else {
-                    missingUnitCode(main.getInfo());
-                }
-                dest = g.getTerritoryFromCode(movem.group(3));
-                if (dest != null) {
-                    if (main.getOccupant().canMove(dest.getInfo())) {
-                        if (!g.graph.areConnected(main.getInfo(), dest.getInfo())) {
-                            //Has convoy?
-                            if (!g.graph.areConnectedViaWater(main.getInfo(), dest.getInfo())) {
-                                notAdjacentTerritoy(main.getInfo(), dest.getInfo());
-                            }
+                if (main.getOwner() == p.getCountry()) {
+                    if (main.getOccupant() != null) {
+                        Unit.UnitType ut = getUnitTypeFromCode(movem.group(1));
+                        if (ut != main.getOccupant().getType()) {
+                            incorrectUnitCode(main.getInfo(), ut);
                         }
                     } else {
-                        invalidTerritoryTypeForUnit(main.getOccupant(), dest.getInfo());
+                        missingUnitCode(main.getInfo());
+                    }
+                    dest = g.getTerritoryFromCode(movem.group(3));
+                    if (dest != null) {
+                        if (main.getOccupant() != null) {
+                            if (main.getOccupant().canMove(dest.getInfo())) {
+                                if (!g.graph.areConnected(main.getInfo(), dest.getInfo())) {
+                                    //Has convoy?
+                                    if (!g.graph.areConnectedViaWater(main.getInfo(), dest.getInfo())) {
+                                        notAdjacentTerritoy(main.getInfo(), dest.getInfo());
+                                    }
+                                }
+                            } else {
+                                invalidTerritoryTypeForUnit(main.getOccupant(), dest.getInfo());
+                            }
+                        } else {
+                            missingUnitCode(main.getInfo());
+                        }
+                    } else {
+                        invalidTerritoyCode(movem.group(3));
                     }
                 } else {
-                    invalidTerritoyCode(movem.group(3));
+                    invalidOwner(main);
                 }
             } else {
                 invalidTerritoyCode(movem.group(2));
@@ -79,34 +111,41 @@ public class Order {
             type = OrderType.SUPPORT;
             main = g.getTerritoryFromCode(suppm.group(2));
             if (main != null) {
-                if (main.getOccupant() != null) {
-                    Unit.UnitType ut = getUnitTypeFromCode(suppm.group(1));
-                    if (ut != main.getOccupant().getType()) {
-                        incorrectUnitCode(main.getInfo(), ut);
-                    }
-                } else {
-                    missingUnitCode(main.getInfo());
-                }
-                smain = g.getTerritoryFromCode(suppm.group(4));
-                if (smain != null) {
-                    if (smain.getOccupant() != null) {
-                        Unit.UnitType ut = getUnitTypeFromCode(suppm.group(3));
-                        if (ut != smain.getOccupant().getType()) {
-                            incorrectUnitCode(smain.getInfo(), ut);
+                if (main.getOwner() == p.getCountry()) {
+                    if (main.getOccupant() != null) {
+                        Unit.UnitType ut = getUnitTypeFromCode(suppm.group(1));
+                        if (ut != main.getOccupant().getType()) {
+                            incorrectUnitCode(main.getInfo(), ut);
                         }
                     } else {
-                        missingUnitCode(smain.getInfo());
+                        missingUnitCode(main.getInfo());
                     }
-                    if (suppm.groupCount() == 5) {
-                        dest = g.getTerritoryFromCode(suppm.group(5));
-                        if (dest != null) {
-                            if (!g.graph.areConnected(main.getInfo(), dest.getInfo())) {
-                                notAdjacentTerritoy(main.getInfo(), dest.getInfo());
+                    smain = g.getTerritoryFromCode(suppm.group(4));
+                    if (smain != null) {
+                        if (smain.getOccupant() != null) {
+                            Unit.UnitType ut = getUnitTypeFromCode(suppm.group(3));
+                            if (ut != smain.getOccupant().getType()) {
+                                incorrectUnitCode(smain.getInfo(), ut);
                             }
                         } else {
-                            invalidTerritoyCode(suppm.group(5));
+                            missingUnitCode(smain.getInfo());
+                        }
+                        if (suppm.groupCount() == 5) {
+                            dest = g.getTerritoryFromCode(suppm.group(5));
+                            if (dest != null) {
+                                if (main.getInfo() != dest.getInfo()) {
+                                    if (!g.graph.areConnected(main.getInfo(), dest.getInfo())) {
+                                        notAdjacentTerritoy(main.getInfo(), dest.getInfo());
+                                    }
+                                } else {
+                                    valid = false;
+                                    vmsg = "I do apologize, but you cannot support an attack to the territory you are supporting from!";
+                                }
+                            }
                         }
                     }
+                } else {
+                    invalidOwner(main);
                 }
             } else {
                 invalidTerritoyCode(suppm.group(2));
@@ -115,45 +154,49 @@ public class Order {
             type = OrderType.CONVOY;
             main = g.getTerritoryFromCode(convm.group(2));
             if (main != null) {
-                if (main.getInfo().getType() == TerritoryDescriptor.TerritoryType.WATER) {
-                    if (main.getOccupant() != null) {
-                        Unit.UnitType ut = getUnitTypeFromCode(convm.group(1));
-                        if (ut == Unit.UnitType.FLEET) {
-                            if (ut != main.getOccupant().getType()) {
-                                incorrectUnitCode(main.getInfo(), ut);
-                            }
-                        } else {
-                            invalidConvoyType();
-                        }
-                    } else {
-                        missingUnitCode(main.getInfo());
-                    }
-                    smain = g.getTerritoryFromCode(convm.group(4));
-                    if (smain != null) {
-                        if (smain.getOccupant() != null) {
-                            Unit.UnitType ut = getUnitTypeFromCode(convm.group(3));
-                            if (ut == Unit.UnitType.ARMY) {
-                                if (ut != smain.getOccupant().getType()) {
-                                    incorrectUnitCode(smain.getInfo(), ut);
+                if (main.getOwner() == p.getCountry()) {
+                    if (main.getInfo().getType() == TerritoryDescriptor.TerritoryType.WATER) {
+                        if (main.getOccupant() != null) {
+                            Unit.UnitType ut = getUnitTypeFromCode(convm.group(1));
+                            if (ut == Unit.UnitType.FLEET) {
+                                if (ut != main.getOccupant().getType()) {
+                                    incorrectUnitCode(main.getInfo(), ut);
                                 }
                             } else {
                                 invalidConvoyType();
                             }
                         } else {
-                            missingUnitCode(smain.getInfo());
+                            missingUnitCode(main.getInfo());
                         }
-                        dest = g.getTerritoryFromCode(convm.group(5));
-                        if (dest != null) {
-                            if (!g.graph.areConnectedViaWater(smain.getInfo(), dest.getInfo())) {
-                                notAdjacentTerritoy(main.getInfo(), dest.getInfo());
+                        smain = g.getTerritoryFromCode(convm.group(4));
+                        if (smain != null) {
+                            if (smain.getOccupant() != null) {
+                                Unit.UnitType ut = getUnitTypeFromCode(convm.group(3));
+                                if (ut == Unit.UnitType.ARMY) {
+                                    if (ut != smain.getOccupant().getType()) {
+                                        incorrectUnitCode(smain.getInfo(), ut);
+                                    }
+                                } else {
+                                    invalidConvoyType();
+                                }
+                            } else {
+                                missingUnitCode(smain.getInfo());
                             }
-                        } else {
-                            invalidTerritoyCode(convm.group(5));
+                            dest = g.getTerritoryFromCode(convm.group(5));
+                            if (dest != null) {
+                                if (!g.graph.areConnectedViaWater(smain.getInfo(), dest.getInfo())) {
+                                    notAdjacentTerritoy(main.getInfo(), dest.getInfo());
+                                }
+                            } else {
+                                invalidTerritoyCode(convm.group(5));
+                            }
                         }
+                    } else {
+                        valid = false;
+                        vmsg = "I do apologize, but you cannot convoy units across land!";
                     }
                 } else {
-                    valid = false;
-                    vmsg = "I do apologize, you cannot convoy units across land!";
+                    invalidOwner(main);
                 }
             } else {
                 invalidTerritoyCode(convm.group(2));
@@ -161,6 +204,12 @@ public class Order {
         } else {
             invalidOrder();
         }
+    }
+
+    public Order(OrderType type, Country sender, Territory main) {
+        this.type = type;
+        this.sender = sender;
+        this.main = main;
     }
 
     public OrderType getType() {
@@ -175,12 +224,12 @@ public class Order {
     
     private void incorrectUnitCode(TerritoryDescriptor td, Unit.UnitType ut) {
         valid = false;
-        vmsg = "I do apologize, but I don't see a " + ut + " in " + td.getName() + ".";
+        vmsg = "I do apologize, but I don't see a(n) " + ut + " in " + td.getName() + ".";
     }
     
     private void invalidConvoyType() {
         valid = false;
-        vmsg = "I do apologize, but only a Fleet can convoy an Army.";
+        vmsg = "I do apologize, but only a Fleet can convoy units, and they only know how to carry an Army.";
     }
     
     private void missingUnitCode(TerritoryDescriptor td) {
@@ -205,12 +254,12 @@ public class Order {
     
     private void invalidTerritoryTypeForUnit(Unit u, TerritoryDescriptor td) {
         valid = false;
-        vmsg = "I do apologize, but a " + u.getType() + " cannot move into " + td.getType();
+        vmsg = "I do apologize, but a(n) " + u.getType() + " cannot move into " + td.getType();
     }
     
     private void invalidOwner(Territory t) {
         valid = false;
-        vmsg = "I do apologize, but " + t.getInfo().getName() + " does not belog to you, and therefore it's unit will not listen to your orders!";
+        vmsg = "I do apologize, but " + t.getInfo().getName() + " does not belog to you, and therefore the unit stationed there will not listen to your orders!";
     }
 
     public boolean isValid() {
@@ -236,6 +285,8 @@ public class Order {
     @Override
     public String toString() {
         switch (type) {
+            case SELECT:
+                return main.getOccupant().getType() + " in " + main.getInfo().getName();
             case HOLD:
                 return main.getOccupant().getType() + " in " + main.getInfo().getName() + " should hold.";
             case MOVE:
@@ -249,6 +300,6 @@ public class Order {
     }
     
     public enum OrderType {
-        HOLD, MOVE, SUPPORT, CONVOY;
+        HOLD, MOVE, SUPPORT, CONVOY, SELECT;
     }
 }
