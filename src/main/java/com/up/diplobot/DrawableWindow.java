@@ -8,7 +8,6 @@ import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.awt.image.BufferedImage;
 import java.util.function.BiConsumer;
-import java.util.function.Consumer;
 
 /**
  *

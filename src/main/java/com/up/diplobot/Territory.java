@@ -1,10 +1,12 @@
 package com.up.diplobot;
 
+import java.io.Serializable;
+
 /**
  *
  * @author Ricky
  */
-public class Territory {
+public class Territory implements Serializable {
     private TerritoryDescriptor info;
     private Country owner;
     private Unit occupant = null;

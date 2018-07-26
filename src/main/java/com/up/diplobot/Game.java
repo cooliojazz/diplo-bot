@@ -8,8 +8,10 @@ import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
@@ -80,6 +82,13 @@ public class Game {
         return influence.get(t.getInfo());
     }
     
+    public void resetInfluences() {
+        influence.clear();
+        for (Territory t : territories) {
+            influence.put(t.getInfo(), new HashMap<>());
+        }
+    }
+    
     public HashMap<TerritoryDescriptor, Pair<TerritoryDescriptor, Integer>> calculateMaxInfluences() {
         HashMap<TerritoryDescriptor, Pair<TerritoryDescriptor, Integer>> maxis = new HashMap<>();
         for (Map.Entry<TerritoryDescriptor, HashMap<TerritoryDescriptor, Integer>> tis : influence.entrySet()) {
@@ -105,8 +114,12 @@ public class Game {
     
     public void startGame() {
         loadMap();
-        for (TerritoryDescriptor td : territoryinfo) {
-            territories.add(new Territory(td));
+        if (new File("game.jsd").exists()) {
+            loadGame();
+        } else {
+            for (TerritoryDescriptor td : territoryinfo) {
+                territories.add(new Territory(td));
+            }
         }
     }
     
@@ -124,7 +137,7 @@ public class Game {
     
     public void drawEditor(Rectangle r, Graphics g) {
         g.drawImage(map, 0, 0, (int)r.getWidth(), (int)r.getHeight(), null);
-        for (AdjacencyGraph.GraphPair<TerritoryDescriptor, TerritoryDescriptor> con : graph.getConnections()) {
+        for (AdjacencyGraph.OrderlessPair<TerritoryDescriptor, TerritoryDescriptor> con : graph.getConnections()) {
             g.setColor(Color.DARK_GRAY);
             g.drawLine((int)(con.t.getPosition().getX() * r.getWidth()), (int)(con.t.getPosition().getY() * r.getHeight()), (int)(con.s.getPosition().getX() * r.getWidth()), (int)(con.s.getPosition().getY() * r.getHeight()));
         }
@@ -167,6 +180,34 @@ public class Game {
         }
     }
     
+    public void loadGame() {
+        File f = new File("game.jsd");
+        try (ObjectInputStream os = new ObjectInputStream(new FileInputStream(f))) {
+            territories = (ArrayList<Territory>)os.readObject();
+            players = (ArrayList<Player>)os.readObject();
+            turn = os.readInt();
+        } catch (FileNotFoundException ex) {
+            Logger.getLogger(GraphBuilder.class.getName()).log(Level.SEVERE, null, ex);
+        } catch (IOException ex) {
+            Logger.getLogger(GraphBuilder.class.getName()).log(Level.SEVERE, null, ex);
+        } catch (ClassNotFoundException ex) {
+            Logger.getLogger(GraphBuilder.class.getName()).log(Level.SEVERE, null, ex);
+        }
+    }
+    
+    public void saveGame() {
+        File f = new File("game.jsd");
+        try (ObjectOutputStream os = new ObjectOutputStream(new FileOutputStream(f))) {
+            os.writeObject(territories);
+            os.writeObject(players);
+            os.writeInt(turn);
+        } catch (FileNotFoundException ex) {
+            Logger.getLogger(GraphBuilder.class.getName()).log(Level.SEVERE, null, ex);
+        } catch (IOException ex) {
+            Logger.getLogger(GraphBuilder.class.getName()).log(Level.SEVERE, null, ex);
+        }
+    }
+    
     public static Color getBGTextColor(Color c) {
         float[] hsb = Color.RGBtoHSB(c.getRed(), c.getGreen(), c.getBlue(), null);
         hsb[0] = hsb[0] + 0.5f;
@@ -187,7 +228,6 @@ public class Game {
         public String toString() {
             return name;
         }
-        
         
     }
 }

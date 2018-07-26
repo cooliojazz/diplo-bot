@@ -1,14 +1,15 @@
 package com.up.diplobot;
 
-import com.sun.org.apache.bcel.internal.generic.D2F;
 import java.awt.Rectangle;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
 import java.text.DateFormat;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -38,6 +39,21 @@ import net.dv8tion.jda.core.hooks.ListenerAdapter;
  */
 public class Main extends ListenerAdapter {
     
+    /*
+    __Formal Guide to Diplo-Bot__
+    **1.** Send it a request to play, something along the lines of *I would like to play the game.*, with politeness to suit.
+    **2.** Wait for a turn notification
+    **3.** Send it all orders for that turn in standard diplomacy format (eg. *A MUN-BER*), and it will inform you of any mistakes you may have made and ask you to correct them (eg. trying to order a unit in a territory you don't own)
+    **4.** Check the #game-map and #game-orders channels to see all the submitted orders, along with the state of the board after they were executed.
+    **5.** Some units may have been displaced, and if so, need to retreat. Diplo-Bot will inform you of any such units, and you may then use a standard move order to specify where it should retreat to. Any units left without valid orders in this phase will subsequently be disbanded.
+    **6.** If this is a spring turn, your supply will be updated, and so you may have units to recruit or units to disband. Diplo-Bot will inform you of which it is, and you specify the units for either the same way, with a simple order that is just what and where (eg. *A KIE*)
+    **7.** Repeat ad naseum.
+    */
+    
+    
+    
+    
+    
     /**
      * Game order:
     =* 0. Have everyone register as a country 
@@ -53,8 +69,8 @@ public class Main extends ListenerAdapter {
      */
 
 //    public static final long TURN_INTERVAL = 1000 * 60 * 60 * 24 * 3;
-    public static final long TURN_INTERVAL = 1000 * 20;
-    public static final long RETREATS_INTERVAL = 1000 * 10;
+    public static final long TURN_INTERVAL = 1000 * 60;
+    public static final long RETREATS_INTERVAL = 1000 * 30;
     public static final long SUPPLY_INTERVAL = 1000 * 30;
     public static Date nextt = new Date();
     public Game game = new Game();
@@ -94,7 +110,7 @@ public class Main extends ListenerAdapter {
             HashMap<Order, String> orderis = new HashMap<>();
             for (Player p : game.getPlayers()) {
                 for (Order o : p.getOrders()) {
-                    orderis.put(o, "*" + p.getUser().getName() + "* ordered that the " + o);
+                    orderis.put(o, "**" + p.getUser().getName() + "** ordered that the " + o);
                 }
             }
 
@@ -118,6 +134,7 @@ public class Main extends ListenerAdapter {
                 }
             }
             //Calculate influence
+            game.resetInfluences();
             for (Order o : gorders.get(Order.OrderType.HOLD)) {
                 HashMap<TerritoryDescriptor, Integer> si = game.getInfluencesOn(o.main);
                 si.put(o.main.getInfo(), 1);
@@ -201,7 +218,7 @@ public class Main extends ListenerAdapter {
             ordersm.add("\n╓┘\n╠═══════════════════════════════════════\n║\n" + "║ Orders for the " + game.getSeason() + " of " + game.getYear() + " are as follows:\n║\n");
             for (Map.Entry<Order, String> os : orderis.entrySet()) {
                 if (ordersm.get(ordersm.size() - 1).length() > 1500) ordersm.add("");
-                ordersm.set(ordersm.size() - 1, ordersm.get(ordersm.size() - 1) + "║ " + (os.getKey().isFailed() ? "~~" : "") + os.getValue() + (os.getKey().isFailed() ? "~~" : "")  + "\n");
+                ordersm.set(ordersm.size() - 1, ordersm.get(ordersm.size() - 1) + "║ **•** " + (os.getKey().isFailed() ? "~~" : "") + os.getValue() + (os.getKey().isFailed() ? "~~" : "")  + "\n");
             }
             ordersm.set(ordersm.size() - 1, ordersm.get(ordersm.size() - 1) + "║\n╠═══════════════════════════════════════\n╙┐\n");
             for (String msg : ordersm) sendChannelMessage(orderschan, msg);
@@ -220,7 +237,6 @@ public class Main extends ListenerAdapter {
     
     public void processDisplacements() {
         //Handle displacements
-        //...........
         ArrayList<Order> orders = new ArrayList<>();
         for (Player p : game.getPlayers()) {
             for (Order o : p.getOrders()) {
@@ -236,7 +252,7 @@ public class Main extends ListenerAdapter {
                 si.put(o.main.getInfo(), si.get(o.main.getInfo()) + 1);
             }
         }
-        //Get maxes
+        
         HashMap<TerritoryDescriptor, Pair<TerritoryDescriptor, Integer>> maxis = game.calculateMaxInfluences();
 
         //Do moves
@@ -252,7 +268,8 @@ public class Main extends ListenerAdapter {
                 o.setFailed(true);
             }
         }
-            
+        
+        sendCurrentBoard();
 
         //If fall, update land ownership, check supply, disband or grant
         if (game.getSeason() == Game.Season.FALL) {
@@ -302,6 +319,7 @@ public class Main extends ListenerAdapter {
     }
     
     public void nextTurn() {
+        game.saveGame();
         //Next turn
         for (Player p : game.getPlayers()) {
             p.clearOrders();
@@ -321,10 +339,13 @@ public class Main extends ListenerAdapter {
             switch (phase) {
                 case JOINING: {
                     if (ply == null) {
-                        Pattern joinp = Pattern.compile("I would (?:very )?(?:much )?(?:like to (?:join|play)|appreciate (?:join|play)ing) (?:the game|Diplomacy)? ?as (.+)\\.");
+                        Pattern joinp = Pattern.compile("[Ii] would (?:very )?(?:much )?(?:like to (?:join|play)|appreciate (?:join|play)ing) (?:the game |[Dd]iplomacy )?as (.+)\\.");
+//                        Pattern joinp = Pattern.compile("[Ii] would (?:very )?(?:much )?(?:like to (?:join|play)|appreciate (?:join|play)ing) (?:the game|[Dd]iplomacy)?\\.");
                         Matcher joinm = joinp.matcher(event.getMessage().getContent());
                         if (joinm.find()) {
                             Country c = Country.valueOf(joinm.group(1).toUpperCase());
+//                            List<Country> freec = Arrays.asList(Country.values()).stream().filter(c -> !game.getPlayers().stream().anyMatch(p -> p.getCountry() == c)).collect(Collectors.toList());
+//                            Country c = freec.get((int)(Math.random() * freec.size()));
                             if (game.getPlayers().stream().anyMatch(p -> p.getCountry() == c)) {
                                 sendUserMessage(event.getAuthor(), "I do apologize, but the esteemed " + game.getPlayers().stream().filter(p -> p.getCountry() == c).findFirst().get().getUser().getName() + " has already stepped up to play as " + c + ". Do please choose someone else and try again though!");
                                 return;
